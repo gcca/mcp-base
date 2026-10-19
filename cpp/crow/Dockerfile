@@ -4,9 +4,9 @@ ARG BUILD_JOBS=8
 FROM cgr.dev/chainguard/wolfi-base:latest AS build
 
 ARG ASIO_TAG=asio-1-38-2
-ARG ASIO_COMMIT=12b52a54a25d1861b037bc5d9810f92a7151d920
+ARG ASIO_COMMIT=8806a6803cde7054c3049d3666d3ec36786568c5
 ARG CROW_TAG=v1.3.4
-ARG CROW_COMMIT=cfe92bb464cdc7ca08b403d8782ee8de99df3722
+ARG CROW_COMMIT=ae0fef0ee67eec897e401321b99b6dd7cfbdc155
 
 RUN apk add --no-cache \
         build-base \
@@ -19,6 +19,7 @@ RUN ninja --version
 
 RUN git clone --branch "${ASIO_TAG}" --depth 1 https://github.com/chriskohlhoff/asio.git /tmp/asio \
     && test "$(git -C /tmp/asio rev-parse HEAD)" = "${ASIO_COMMIT}" \
+    && mkdir -p /usr/local/include \
     && cp -r /tmp/asio/asio/include/asio.hpp /tmp/asio/asio/include/asio /usr/local/include/ \
     && rm -rf /tmp/asio
 
