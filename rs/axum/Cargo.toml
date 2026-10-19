@@ -1,0 +1,13 @@
+[package]
+name = "mcp-axum"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mcp-axum"
+path = "mcp.rs"
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
+tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread"] }
