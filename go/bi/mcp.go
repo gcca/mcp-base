@@ -1,17 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func envOr(name, fallback string) string {
@@ -121,35 +116,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func run() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /mcp", handle)
-	server := &http.Server{
-		Addr:    net.JoinHostPort(envOr("MCP_BIND", "127.0.0.1"), envOr("MCP_PORT", "8080")),
-		Handler: mux,
-	}
-	stopped := make(chan error, 1)
-	go func() {
-		stopped <- server.ListenAndServe()
-	}()
-	select {
-	case err := <-stopped:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownCtx)
-	}
-}
-
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
+	addr := net.JoinHostPort(envOr("MCP_BIND", "127.0.0.1"), envOr("MCP_PORT", "8080"))
+	log.Fatal(http.ListenAndServe(addr, mux))
 }

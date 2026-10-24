@@ -4,9 +4,9 @@ import os
 import sanic
 import sanic.response
 
-DEFAULT_PROTOCOL_VERSION = "2025-06-18"
 
-app = sanic.Sanic("mcp_sanic")
+def env_or(name: str, fallback: str) -> str:
+    return os.environ.get(name) or fallback
 
 
 def string_field(obj: object, key: str) -> str | None:
@@ -32,11 +32,12 @@ def fail(
 
 
 def initialize_result(message: dict[str, object]) -> dict[str, object]:
+    version = "2025-06-18"
     requested = string_field(message.get("params"), "protocolVersion")
+    if requested is not None:
+        version = requested
     return {
-        "protocolVersion": (
-            DEFAULT_PROTOCOL_VERSION if requested is None else requested
-        ),
+        "protocolVersion": version,
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "mcp-sanic", "version": "0.1.0"},
     }
@@ -58,8 +59,11 @@ def tools_list_result() -> dict[str, object]:
     }
 
 
+app = sanic.Sanic("mcp_sanic")
+
+
 @app.post("/mcp", strict_slashes=True)
-async def mcp(request: sanic.Request) -> sanic.HTTPResponse:
+async def handle(request: sanic.Request) -> sanic.HTTPResponse:
     try:
         message = json.loads(request.body)
     except (ValueError, RecursionError):
@@ -86,6 +90,6 @@ async def mcp(request: sanic.Request) -> sanic.HTTPResponse:
 
 if __name__ == "__main__":
     app.run(
-        host=os.environ.get("MCP_BIND") or "127.0.0.1",
-        port=int(os.environ.get("MCP_PORT") or "8080"),
+        host=env_or("MCP_BIND", "127.0.0.1"),
+        port=int(env_or("MCP_PORT", "8080")),
     )

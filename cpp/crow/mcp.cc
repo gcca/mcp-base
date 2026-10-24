@@ -43,10 +43,10 @@ crow::response fail(const crow::json::wvalue& id, int code, const char* text,
   return crow::response(status, message);
 }
 
-crow::json::wvalue initialize_result(const crow::json::rvalue& request) {
+crow::json::wvalue initialize_result(const crow::json::rvalue& message) {
   std::string version = "2025-06-18";
-  if (request.has("params")) {
-    if (auto requested = string_field(request["params"], "protocolVersion")) {
+  if (message.has("params")) {
+    if (auto requested = string_field(message["params"], "protocolVersion")) {
       version = *requested;
     }
   }
@@ -72,24 +72,24 @@ crow::json::wvalue tools_list_result() {
 }
 
 crow::response handle(const std::string& body) {
-  crow::json::rvalue request = crow::json::load(body);
-  if (!request) {
+  crow::json::rvalue message = crow::json::load(body);
+  if (!message) {
     return fail(crow::json::wvalue(nullptr), -32700, "Parse error", 400);
   }
-  if (request.t() != crow::json::type::Object) {
+  if (message.t() != crow::json::type::Object) {
     return fail(crow::json::wvalue(nullptr), -32600, "Invalid Request", 400);
   }
-  if (!request.has("id")) {
+  if (!message.has("id")) {
     return crow::response(202);
   }
 
-  crow::json::wvalue id(request["id"]);
-  auto method = string_field(request, "method");
+  crow::json::wvalue id(message["id"]);
+  auto method = string_field(message, "method");
   if (!method) {
     return fail(id, -32600, "Invalid Request");
   }
   if (*method == "initialize") {
-    return reply(id, initialize_result(request));
+    return reply(id, initialize_result(message));
   }
   if (*method == "ping") {
     return reply(id, crow::json::wvalue::empty_object());
