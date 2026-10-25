@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 func envOr(name, fallback string) string {
@@ -26,6 +28,17 @@ func stringField(object map[string]json.RawMessage, key string) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+func numberField(object map[string]json.RawMessage, key string) (float64, bool) {
+	var value *float64
+	if err := json.Unmarshal(object[key], &value); err != nil || value == nil {
+		return 0, false
+	}
+	if math.IsNaN(*value) || math.IsInf(*value, 0) {
+		return 0, false
+	}
+	return *value, true
 }
 
 func envelope(id json.RawMessage) map[string]any {
@@ -52,6 +65,13 @@ func fail(w http.ResponseWriter, id json.RawMessage, code int, text string, stat
 	writeJSON(w, status, message)
 }
 
+func toolResult(text string, isError bool) map[string]any {
+	return map[string]any{
+		"content": []any{map[string]any{"type": "text", "text": text}},
+		"isError": isError,
+	}
+}
+
 func initializeResult(message map[string]json.RawMessage) map[string]any {
 	version := "2025-06-18"
 	var params map[string]json.RawMessage
@@ -68,19 +88,70 @@ func initializeResult(message map[string]json.RawMessage) map[string]any {
 }
 
 func toolsListResult() map[string]any {
-	return map[string]any{
-		"tools": []any{
-			map[string]any{
-				"name":        "echo",
-				"description": "Dummy tool",
-				"inputSchema": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{"text": map[string]any{"type": "string"}},
-					"required":   []string{"text"},
+	tools := []any{}
+	for _, definition := range [][2]string{
+		{"add", "Add a and b."},
+		{"subtract", "Subtract b from a."},
+		{"multiply", "Multiply a by b."},
+		{"divide", "Divide a by b."},
+	} {
+		tools = append(tools, map[string]any{
+			"name":        definition[0],
+			"description": definition[1],
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"a": map[string]any{"type": "number"},
+					"b": map[string]any{"type": "number"},
 				},
+				"required": []string{"a", "b"},
 			},
-		},
+		})
 	}
+	return map[string]any{"tools": tools}
+}
+
+func callTool(w http.ResponseWriter, id json.RawMessage, message map[string]json.RawMessage) {
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(message["params"], &params); err != nil || params == nil {
+		fail(w, id, -32602, "Invalid params", http.StatusOK)
+		return
+	}
+	name, named := stringField(params, "name")
+	var arguments map[string]json.RawMessage
+	if err := json.Unmarshal(params["arguments"], &arguments); err != nil || arguments == nil {
+		fail(w, id, -32602, "Invalid params", http.StatusOK)
+		return
+	}
+	a, hasA := numberField(arguments, "a")
+	b, hasB := numberField(arguments, "b")
+	if !named || !hasA || !hasB {
+		fail(w, id, -32602, "Invalid params", http.StatusOK)
+		return
+	}
+	var value float64
+	switch name {
+	case "add":
+		value = a + b
+	case "subtract":
+		value = a - b
+	case "multiply":
+		value = a * b
+	case "divide":
+		if b == 0 {
+			reply(w, id, toolResult("Cannot divide by zero.", true))
+			return
+		}
+		value = a / b
+	default:
+		fail(w, id, -32602, "Invalid params", http.StatusOK)
+		return
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		reply(w, id, toolResult("Result is not finite.", true))
+		return
+	}
+	reply(w, id, toolResult(strconv.FormatFloat(value, 'g', -1, 64), false))
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +182,8 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		reply(w, id, map[string]any{})
 	case "tools/list":
 		reply(w, id, toolsListResult())
+	case "tools/call":
+		callTool(w, id, message)
 	default:
 		fail(w, id, -32601, "Method not found", http.StatusOK)
 	}
@@ -119,6 +192,6 @@ func handle(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /mcp", handle)
-	addr := net.JoinHostPort(envOr("MCP_BIND", "127.0.0.1"), envOr("MCP_PORT", "8080"))
+	addr := net.JoinHostPort(envOr("MCP_BIND", "127.0.0.1"), envOr("MCP_PORT", "8000"))
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

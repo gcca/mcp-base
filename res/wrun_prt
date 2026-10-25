@@ -1,6 +1,6 @@
 #!/usr/bin/env fish
 
-set -l url 127.0.0.1:8080/mcp
+set -l url 127.0.0.1:8000/mcp
 set -q argv[1]; and set url $argv[1]
 
 http --print=Bhb POST $url jsonrpc=2.0 id:=1 method=initialize params:='{"protocolVersion":"2025-06-18"}'

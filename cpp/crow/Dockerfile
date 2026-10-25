@@ -67,10 +67,10 @@ COPY --from=build /out/ /
 WORKDIR /app
 
 ENV MCP_BIND=0.0.0.0 \
-    MCP_PORT=8080
+    MCP_PORT=8000
 
 USER 65532:65532
 
-EXPOSE 8080
+EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/mcp"]

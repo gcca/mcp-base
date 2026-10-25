@@ -1,11 +1,12 @@
 import copy
 import http.client
 import json
+import math
 import sys
 import typing
 import urllib.parse
 
-DEFAULT_URL = "127.0.0.1:8080/mcp"
+DEFAULT_URL = "127.0.0.1:8000/mcp"
 JSON_HEADERS = {"Content-Type": "application/json"}
 MISSING = object()
 EMPTY = object()
@@ -21,6 +22,7 @@ class Case(typing.NamedTuple):
     body: bytes | None
     status: int
     check: Check | None = None
+    numeric: bool = False
 
 
 class Reply(typing.NamedTuple):
@@ -54,14 +56,122 @@ def error_is(code: int, id_: typing.Any = None) -> Check:
     )
 
 
+def tools_are(parsed: typing.Any) -> bool:
+    tools = at(parsed, "result", "tools")
+    if not isinstance(tools, list) or len(tools) != 4:
+        return False
+    expected = (
+        ("add", "Add a and b."),
+        ("subtract", "Subtract b from a."),
+        ("multiply", "Multiply a by b."),
+        ("divide", "Divide a by b."),
+    )
+    schema = {
+        "type": "object",
+        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+        "required": ["a", "b"],
+    }
+    return all(
+        at(tool, "name") == name
+        and at(tool, "description") == description
+        and at(tool, "inputSchema") == schema
+        for tool, (name, description) in zip(tools, expected)
+    )
+
+
+def tool_number(parsed: typing.Any) -> float | object:
+    if at(parsed, "result", "isError") is not False:
+        return MISSING
+    content = at(parsed, "result", "content")
+    if not isinstance(content, list) or len(content) != 1:
+        return MISSING
+    text = at(content[0], "text")
+    if at(content[0], "type") != "text" or not isinstance(text, str):
+        return MISSING
+    try:
+        value = json.loads(text)
+        if type(value) not in (int, float):
+            return MISSING
+        value = float(value)
+    except (ValueError, OverflowError):
+        return MISSING
+    return value if math.isfinite(value) else MISSING
+
+
+def tool_is(value: float, id_: typing.Any = 10) -> Check:
+    def check(parsed: typing.Any) -> bool:
+        number = tool_number(parsed)
+        return number is not MISSING and math.isclose(
+            number, value, rel_tol=1e-12, abs_tol=0.0
+        )
+
+    return all_of(
+        has("jsonrpc", value="2.0"), has("id", value=id_), check
+    )
+
+
+def tool_error_is(text: str, id_: typing.Any = 10) -> Check:
+    return all_of(
+        has("jsonrpc", value="2.0"),
+        has("id", value=id_),
+        has(
+            "result",
+            value={
+                "content": [{"type": "text", "text": text}],
+                "isError": True,
+            },
+        ),
+    )
+
+
 def rpc(**fields: typing.Any) -> bytes:
     return json.dumps({"jsonrpc": "2.0", **fields}).encode()
 
 
 def post(
-    name: str, body: bytes, status: int, check: Check | None = None
+    name: str,
+    body: bytes,
+    status: int,
+    check: Check | None = None,
+    numeric: bool = False,
 ) -> Case:
-    return Case(name, "POST", "{base}", body, status, check)
+    return Case(name, "POST", "{base}", body, status, check, numeric)
+
+
+def call(
+    name: str,
+    tool: str,
+    a: float,
+    b: float,
+    value: float,
+    id_: typing.Any = 10,
+) -> Case:
+    return post(
+        name,
+        rpc(
+            id=id_,
+            method="tools/call",
+            params={"name": tool, "arguments": {"a": a, "b": b}},
+        ),
+        200,
+        tool_is(value, id_),
+        numeric=True,
+    )
+
+
+def invalid_call(name: str, params: typing.Any = MISSING) -> Case:
+    fields = {"id": 10, "method": "tools/call"}
+    if params is not MISSING:
+        fields["params"] = params
+    return post(
+        name,
+        rpc(**fields),
+        200,
+        all_of(
+            error_is(-32602, 10),
+            has("error", "message", value="Invalid params"),
+        ),
+    )
 
 
 CASES = (
@@ -71,17 +181,14 @@ CASES = (
         200,
         all_of(
             has("id", value=1),
-            has("result", "tools", 0, "name", value="echo"),
-            has(
-                "result", "tools", 0, "inputSchema", "required", value=["text"]
-            ),
+            tools_are,
         ),
     ),
     post(
         "tools/list id='abc'",
         rpc(id="abc", method="tools/list"),
         200,
-        has("id", value="abc"),
+        all_of(has("id", value="abc"), tools_are),
     ),
     post(
         "notification initialized",
@@ -169,6 +276,115 @@ CASES = (
         404,
     ),
     Case("POST /other", "POST", "/other", rpc(id=1, method="ping"), 404),
+    call("add", "add", 2, 3, 5),
+    call("subtract", "subtract", 10, 4, 6),
+    call("multiply", "multiply", 6, 7, 42),
+    call("divide fractional", "divide", 7, 2, 3.5),
+    call("add negative decimals", "add", -2.5, 1.25, -1.25),
+    call("subtract operand order", "subtract", 2, 5, -3),
+    call("multiply negatives", "multiply", -2.5, -4, 10),
+    call("divide negative", "divide", -7, 2, -3.5),
+    call("divide repeating", "divide", 1, 3, 0.3333333333333333),
+    call("add zero", "add", 0, 0, 0),
+    call("decimal rounding", "add", 0.1, 0.2, 0.30000000000000004),
+    call("small operands", "add", 1e-100, 1e-100, 2e-100),
+    call("large operands", "add", 1e100, 1e100, 2e100),
+    call("arithmetic underflow", "multiply", 1e-300, 1e-300, 0),
+    call("call string id", "add", 2, 3, 5, "abc"),
+    call("call null id", "add", 2, 3, 5, None),
+    call("call object id", "add", 2, 3, 5, {"a": 1}),
+    post(
+        "extra arguments ignored",
+        rpc(
+            id=10,
+            method="tools/call",
+            params={"name": "add", "arguments": {"a": 2, "b": 3, "c": 9}},
+        ),
+        200,
+        tool_is(5),
+        numeric=True,
+    ),
+    *(
+        post(
+            name,
+            rpc(
+                id=10,
+                method="tools/call",
+                params={"name": tool, "arguments": {"a": a, "b": b}},
+            ),
+            200,
+            tool_error_is(text),
+        )
+        for name, tool, a, b, text in (
+            ("divide by zero", "divide", 7, 0, "Cannot divide by zero."),
+            (
+                "divide negative zero", "divide", 7, -0.0,
+                "Cannot divide by zero.",
+            ),
+            ("zero divided by zero", "divide", 0, 0, "Cannot divide by zero."),
+            ("add overflow", "add", 1e308, 1e308, "Result is not finite."),
+            (
+                "subtract overflow", "subtract", -1e308, 1e308,
+                "Result is not finite.",
+            ),
+            (
+                "multiply overflow", "multiply", 1e308, 1e308,
+                "Result is not finite.",
+            ),
+            (
+                "divide overflow", "divide", 1e308, 1e-308,
+                "Result is not finite.",
+            ),
+        )
+    ),
+    invalid_call("call missing params"),
+    *(
+        invalid_call(name, params)
+        for name, params in (
+            ("call null params", None),
+            ("call array params", []),
+            ("call string params", "bad"),
+            ("call missing name", {"arguments": {"a": 2, "b": 3}}),
+            ("call numeric name", {"name": 7, "arguments": {"a": 2, "b": 3}}),
+            ("call missing arguments", {"name": "add"}),
+            ("call null arguments", {"name": "add", "arguments": None}),
+            ("call array arguments", {"name": "add", "arguments": []}),
+            ("call string arguments", {"name": "add", "arguments": "bad"}),
+            ("unknown tool", {"name": "power", "arguments": {"a": 2, "b": 3}}),
+            ("echo removed", {"name": "echo", "arguments": {"a": 2, "b": 3}}),
+        )
+    ),
+    *(
+        invalid_call(name, {"name": "add", "arguments": arguments})
+        for name, arguments in (
+            ("missing a", {"b": 3}),
+            ("missing b", {"a": 2}),
+            ("null a", {"a": None, "b": 3}),
+            ("null b", {"a": 2, "b": None}),
+            ("boolean a", {"a": True, "b": 3}),
+            ("boolean b", {"a": 2, "b": False}),
+            ("string a", {"a": "2", "b": 3}),
+            ("string b", {"a": 2, "b": "3"}),
+            ("array a", {"a": [], "b": 3}),
+            ("object b", {"a": 2, "b": {}}),
+            ("out-of-range a", {"a": 10**400, "b": 3}),
+            ("out-of-range b", {"a": 2, "b": -(10**400)}),
+        )
+    ),
+    *(
+        post(name, rpc(method="tools/call", params=params), 202)
+        for name, params in (
+            (
+                "call notification",
+                {"name": "add", "arguments": {"a": 2, "b": 3}},
+            ),
+            ("invalid call notification", {"name": "add"}),
+            (
+                "zero division notification",
+                {"name": "divide", "arguments": {"a": 1, "b": 0}},
+            ),
+        )
+    ),
 )
 
 
@@ -202,11 +418,16 @@ def parse(body: bytes) -> typing.Any:
         return TEXT
 
 
-def masked(parsed: typing.Any) -> typing.Any:
-    if at(parsed, "result", "serverInfo", "name") is MISSING:
+def masked(parsed: typing.Any, numeric: bool = False) -> typing.Any:
+    name = at(parsed, "result", "serverInfo", "name")
+    number = tool_number(parsed) if numeric else MISSING
+    if name is MISSING and number is MISSING:
         return parsed
     copied = copy.deepcopy(parsed)
-    copied["result"]["serverInfo"]["name"] = "<name>"
+    if name is not MISSING:
+        copied["result"]["serverInfo"]["name"] = "<name>"
+    if number is not MISSING:
+        copied["result"]["content"][0]["text"] = number
     return copied
 
 
@@ -225,18 +446,28 @@ def problems(case: Case, reply: Reply) -> list[str]:
     if parsed is not EMPTY and parsed is not TEXT:
         if not content_type.startswith("application/json"):
             found.append(f"JSON body with content-type {content_type!r}")
+    if case.status in (200, 400):
+        if (
+            not isinstance(parsed, dict)
+            or parsed.get("jsonrpc") != "2.0"
+            or "id" not in parsed
+            or ("result" in parsed) == ("error" in parsed)
+        ):
+            found.append("invalid JSON-RPC response envelope")
     if case.check is not None:
         if parsed is EMPTY or parsed is TEXT or not case.check(parsed):
             found.append("body check failed")
     return found
 
 
-def parity(reference: Reply, other: Reply) -> str:
+def parity(reference: Reply, other: Reply, numeric: bool = False) -> str:
     if reference.status != other.status:
         return f"DIFF status {reference.status} vs {other.status}"
     if reference.status in (404, 405):
         return "same status"
-    if masked(parse(reference.body)) == masked(parse(other.body)):
+    if masked(parse(reference.body), numeric) == masked(
+        parse(other.body), numeric
+    ):
         return "same"
     return "DIFF body"
 
@@ -262,7 +493,9 @@ def main(argv: list[str]) -> int:
         ready = [reply for reply in replies if reply is not None]
         verdicts = []
         if len(ready) > 1 and len(ready) == len(replies):
-            verdicts = [parity(ready[0], reply) for reply in ready[1:]]
+            verdicts = [
+                parity(ready[0], reply, case.numeric) for reply in ready[1:]
+            ]
             details.extend(
                 f"{case.name}: parity {text}"
                 for text in verdicts

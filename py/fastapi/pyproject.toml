@@ -1,0 +1,15 @@
+[project]
+name = "mcp-fastapi"
+version = "0.1.0"
+description = "Minimal dummy MCP server on FastAPI"
+dependencies = [
+    "fastapi>=0.162,<0.163",
+    "uvicorn>=0.54,<0.55",
+]
+requires-python = "==3.13.*"
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.scripts]
+start = "python mcp.py"
