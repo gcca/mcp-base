@@ -3,17 +3,17 @@
 set -l url 127.0.0.1:8000/mcp
 set -q argv[1]; and set url $argv[1]
 
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=1 method=initialize params:='{"protocolVersion":"2025-06-18"}'
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=1 method=initialize params:='{"protocolVersion":"2025-06-18"}'
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 method=notifications/initialized
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 method=notifications/initialized
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=2 method=tools/list
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=2 method=tools/list
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=3 method=tools/call params:='{"name":"add","arguments":{"a":2,"b":3}}'
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=3 method=tools/call params:='{"name":"add","arguments":{"a":2,"b":3}}'
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=4 method=tools/call params:='{"name":"subtract","arguments":{"a":10,"b":4}}'
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=4 method=tools/call params:='{"name":"subtract","arguments":{"a":10,"b":4}}'
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=5 method=tools/call params:='{"name":"multiply","arguments":{"a":6,"b":7}}'
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=5 method=tools/call params:='{"name":"multiply","arguments":{"a":6,"b":7}}'
 or exit $status
-http --ignore-stdin --check-status --print=Bhb POST $url jsonrpc=2.0 id:=6 method=tools/call params:='{"name":"divide","arguments":{"a":7,"b":2}}'
+http --ignore-stdin --check-status --print=HBhb POST $url jsonrpc=2.0 id:=6 method=tools/call params:='{"name":"divide","arguments":{"a":7,"b":2}}'
 or exit $status
